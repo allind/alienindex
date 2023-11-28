@@ -1,10 +1,14 @@
 #! /usr/bin/env python
-#usage: script.py [bls] [outfile]
-#considering classes as informative
+#usage: script.py [bls vs nr] [bls vs self] [recipient taxid]
+#uses diamond
+#diamond cmd is diamond blastp --query [qfile] --db [db] --outfmt 6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore slen slen qlen nident positive staxids qcovhsp --threads [threads] -b12 -c1 --out [output]
+#for bls vs self, same command except db is the same as query
+#skip and recip file is structured: species_name skip_taxid recipient_name recipient_taxid 
 #diamond NR
 
 from ete3 import NCBITaxa
 import sys, os, re
+
 
 def parse_blast(bls, skip, recipient, ncbi):
 	max_bitscore = 0
@@ -135,7 +139,7 @@ def calculate_alien_info(max_bitscore, in_lineage_hits, out_lineage_hits, ncbi):
 	return alien, best_inlineage, best_inlineage_species, in_class_name, best_outlineage, best_outlineage_species, out_class_name
 def main(argv):
 	
-	ncbi = NCBITaxa("/pollard/data/projects/eukdetect/ncbi_met_and_arch/busco/alien/nr_dl/taxdump-current/taxa.sqlite")
+	ncbi = NCBITaxa("/pollard/data/projects/alind/eukdetect/ncbi_met_and_arch/busco/alien/nr_dl/taxdump-current/taxa.sqlite")
 
 	#
 	#test file just has one sequence
@@ -144,21 +148,33 @@ def main(argv):
 	#qseqid(0) sseqid(1) pident(2) length(3) mismatch(4) gapopen(5) qstart(6) qend(7) sstart(8) send(9) evalue(10) bitscore(11) saccver(12) slen(13) qlen(14) nident(15) positive(16) staxids(17) qcovs(18)
 	#
 	
-	#skip = 95593 #C. albicans
-	#recipient = 4891 #Saccharomycetes class
-	#recipient = 6656 #Candida clade
-	skip_and_recip = {line.split('\t')[0]: line.strip('\n').split('\t')[1:] for line in open("alien_above_0_species_skip_recipient.txt")}
+	skip = 12967 #Blastocystis
+	recipient = 2759 #Euks
+	recipient_name = "Eukaryotes"
+	#skip_and_recip = {line.split('\t')[0]: line.strip('\n').split('\t')[1:] for line in open(sys.argv[2])} #open("alien_above_0_species_skip_recipient.txt")}
+
 	in_lineage_hits = []
 	out_hits = []
 	
+	self_bitscores = {}
+
+	#parse self blast:
+	for line in open(sys.argv[2]):
+		line = line.strip('\n')
+		q = line.split('\t')[0]
+		s = line.split('\t')[1]
+		if q == s:
+			self_bitscores[q] = float(line.split('\t')[-1])
+
+
 	#parse blast
 	parse = []
 	currgene = ""
-	dest = open(sys.argv[2], 'w')
+	dest = open(sys.argv[3], 'w')
 	bls_linecount = len(open(sys.argv[1]).readlines())
 	#print("here")
 	linecounter = 0
-	dest.write("query\talien_score\trecipient_name\trecipient_taxid\tbest_ingroup_hit\tbest_ingroup_species\tbest_ingroup_class\tbest_ingroup_bitscore\tbest_outgroup_hit\tbest_outgroup_species\tbest_outgroup_class\tbest_outgroup_bitscore\tclasses_of_top_4_hits\n")
+	dest.write("query\talien_score\trecipient_name\trecipient_taxid\tbest_ingroup_hit\tbest_ingroup_species\tbest_ingroup_class\tbest_ingroup_bitscore\tbest_outgroup_hit\tbest_outgroup_species\tbest_outgroup_class\tbest_outgroup_bitscore\tclasses_of_top_4_hits\tself_bitscore\n")
 	for line in open(sys.argv[1]):
 		linecounter += 1
 		#print(line)
@@ -173,12 +189,15 @@ def main(argv):
 		else:
 			print("parsing:", currgene)
 
-			species = '-'.join(re.split('-\d*at\d*-', currgene)[0].split('-')[1:])
-			skip = int(skip_and_recip[species][0])
-			recipient = int(skip_and_recip[species][2])
-			recipient_name = skip_and_recip[species][1]
+			#species = '-'.join(re.split('-\d*at\d*-', currgene)[0].split('-')[1:])
+			species = "BT1" #hardcode for now
+			#skip = int(skip_and_recip[species][0]) #donor
+			#recipient = int(skip_and_recip[species][2]) #ingroup
+			#recipient_name = skip_and_recip[species][1]
 
-			max_bitscore, best_lineages, in_lineage_hits, out_hits = parse_blast(parse, skip, recipient, ncbi)
+			max_bitscore = self_bitscores[currgene]
+
+			max_blast_bitscore, best_lineages, in_lineage_hits, out_hits = parse_blast(parse, skip, recipient, ncbi)
 			#iterate over in hits and out hits
 			alien, best_inlineage, best_inlineage_species, in_class_name, \
 			best_outlineage, best_outlineage_species, out_class_name = calculate_alien_info(max_bitscore, in_lineage_hits, out_hits, ncbi)
@@ -187,7 +206,7 @@ def main(argv):
 			"\t" + best_inlineage_species + '\t' + in_class_name + '\t' + \
 			str(best_inlineage[1])+ '\t' + best_outlineage[0] + '\t' + \
 			best_outlineage_species+ '\t' + out_class_name + '\t' + \
-			str(best_outlineage[1]) + '\t' + ",".join(best_lineages) + '\n')
+			str(best_outlineage[1]) + '\t' + ",".join(best_lineages) + '\t' + str(max_bitscore) + '\n')
 			
 			#reset
 			parse = []
@@ -204,7 +223,7 @@ def main(argv):
 	"\t" + best_inlineage_species + '\t' + in_class_name + '\t' + \
 	str(best_inlineage[1])+ '\t' + best_outlineage[0] + '\t' + \
 	best_outlineage_species+ '\t' + out_class_name + '\t' + \
-	str(best_outlineage[1]) + '\t' + ",".join(best_lineages) + '\n')
+	str(best_outlineage[1]) + '\t' + ",".join(best_lineages) +'\t' + str(max_bitscore) +  '\n')
 
 if __name__ == "__main__":
   main(sys.argv)
