@@ -1,5 +1,5 @@
 #! /usr/bin/env python
-#usage: script.py [bls vs nr] [bls vs self] [recipient taxid]
+#usage: script.py [bls vs nr] [bls vs self] [recipient taxid] [output file]
 #uses diamond
 #diamond cmd is diamond blastp --query [qfile] --db [db] --outfmt 6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore slen slen qlen nident positive staxids qcovhsp --threads [threads] -b12 -c1 --out [output]
 #for bls vs self, same command except db is the same as query
@@ -7,7 +7,7 @@
 #diamond NR
 
 from ete3 import NCBITaxa
-import sys, os, re
+import sys, os, re, argparse
 
 
 def parse_blast(bls, skip, recipient, ncbi):
@@ -139,18 +139,40 @@ def calculate_alien_info(max_bitscore, in_lineage_hits, out_lineage_hits, ncbi):
 	return alien, best_inlineage, best_inlineage_species, in_class_name, best_outlineage, best_outlineage_species, out_class_name
 def main(argv):
 	
-	ncbi = NCBITaxa("/pollard/data/projects/alind/eukdetect/ncbi_met_and_arch/busco/alien/nr_dl/taxdump-current/taxa.sqlite")
+	parser = argparse.ArgumentParser(description="Process command line arguments")
+	parser.add_argument("-bs", "--blsself", required=True, help="Self blast")
+	parser.add_argument("-bn", "--blsnr", required=True, help="Diamond (or blast) nr or nr_cluster_seq blast. Command is : diamond blastp --query [qfile] --db [db] --outfmt 6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore slen slen qlen nident positive staxids qcovhsp -b12 -c1")
+	parser.add_argument("-r", "--recipient", required=True, help="Recipient taxonomy ID (eg, 2759 for eukaryotes)")
+	parser.add_argument("-s", "--self", required=True, help="Self taxonomy ID to consider for best hit - species or genus taxonomy ID")
+	parser.add_argument("-t", "--taxdb", help="Optional argument - location for ete3 NCBI taxonomy sqlite database (taxa.sqlite). If you are using a non current version of nr or similar this is necessary, must provide taxonomy database that corresponds to nr version")
+	parser.add_argument("-o", "--output", required=True, help="Output file")
+
+	args = parser.parse_args()
+
+	# Saving command line arguments into variables
+	blsself = args.blsself
+	blsnr = args.blsnr
+	recipient = int(args.recipient)
+	skip = int(args.self)
+	taxdb = args.taxdb
+	destfile = args.output
+
+	if taxdb != None:
+		ncbi = NCBITaxa(taxdb)
+	else:
+		ncbi = NCBITaxa()
 
 	#
 	#test file just has one sequence
 	
 	#structure:
 	#qseqid(0) sseqid(1) pident(2) length(3) mismatch(4) gapopen(5) qstart(6) qend(7) sstart(8) send(9) evalue(10) bitscore(11) saccver(12) slen(13) qlen(14) nident(15) positive(16) staxids(17) qcovs(18)
-	#
 	
-	skip = 12967 #Blastocystis
-	recipient = 2759 #Euks
-	recipient_name = "Eukaryotes"
+	#recipient = 2759 #Euks
+	#recipient_name = "Eukaryotes"
+	recipient_name = list(set(ncbi.get_taxid_translator([recipient]).values()))[0]
+
+
 	#skip_and_recip = {line.split('\t')[0]: line.strip('\n').split('\t')[1:] for line in open(sys.argv[2])} #open("alien_above_0_species_skip_recipient.txt")}
 
 	in_lineage_hits = []
@@ -159,7 +181,7 @@ def main(argv):
 	self_bitscores = {}
 
 	#parse self blast:
-	for line in open(sys.argv[2]):
+	for line in open(blsself):
 		line = line.strip('\n')
 		q = line.split('\t')[0]
 		s = line.split('\t')[1]
@@ -170,14 +192,15 @@ def main(argv):
 	#parse blast
 	parse = []
 	currgene = ""
-	dest = open(sys.argv[3], 'w')
-	bls_linecount = len(open(sys.argv[1]).readlines())
-	#print("here")
+
+	dest = open(destfile, 'w')
+	bls_linecount = len(open(blsnr).readlines())
+
 	linecounter = 0
 	dest.write("query\talien_score\trecipient_name\trecipient_taxid\tbest_ingroup_hit\tbest_ingroup_species\tbest_ingroup_class\tbest_ingroup_bitscore\tbest_outgroup_hit\tbest_outgroup_species\tbest_outgroup_class\tbest_outgroup_bitscore\tclasses_of_top_4_hits\tself_bitscore\n")
-	for line in open(sys.argv[1]):
+	for line in open(blsnr):
 		linecounter += 1
-		#print(line)
+
 		line = line.strip('\n')
 		gene = line.split('\t')[0]
 		
@@ -190,24 +213,26 @@ def main(argv):
 			print("parsing:", currgene)
 
 			#species = '-'.join(re.split('-\d*at\d*-', currgene)[0].split('-')[1:])
-			species = "BT1" #hardcode for now
+			#species = "BT1" #hardcode for now
 			#skip = int(skip_and_recip[species][0]) #donor
 			#recipient = int(skip_and_recip[species][2]) #ingroup
 			#recipient_name = skip_and_recip[species][1]
 
-			max_bitscore = self_bitscores[currgene]
+			#only process gene if it hits self in self blast. things that don't are often low quality
+			if currgene in self_bitscores:
+				max_bitscore = self_bitscores[currgene]
 
-			max_blast_bitscore, best_lineages, in_lineage_hits, out_hits = parse_blast(parse, skip, recipient, ncbi)
-			#iterate over in hits and out hits
-			alien, best_inlineage, best_inlineage_species, in_class_name, \
-			best_outlineage, best_outlineage_species, out_class_name = calculate_alien_info(max_bitscore, in_lineage_hits, out_hits, ncbi)
-			
-			dest.write(currgene + '\t' + str(alien) + '\t' + recipient_name + '\t' + str(recipient) + '\t' + best_inlineage[0] + \
-			"\t" + best_inlineage_species + '\t' + in_class_name + '\t' + \
-			str(best_inlineage[1])+ '\t' + best_outlineage[0] + '\t' + \
-			best_outlineage_species+ '\t' + out_class_name + '\t' + \
-			str(best_outlineage[1]) + '\t' + ",".join(best_lineages) + '\t' + str(max_bitscore) + '\n')
-			
+				max_blast_bitscore, best_lineages, in_lineage_hits, out_hits = parse_blast(parse, skip, recipient, ncbi)
+				#iterate over in hits and out hits
+				alien, best_inlineage, best_inlineage_species, in_class_name, \
+				best_outlineage, best_outlineage_species, out_class_name = calculate_alien_info(max_bitscore, in_lineage_hits, out_hits, ncbi)
+				
+				dest.write(currgene + '\t' + str(alien) + '\t' + recipient_name + '\t' + str(recipient) + '\t' + best_inlineage[0] + \
+				"\t" + best_inlineage_species + '\t' + in_class_name + '\t' + \
+				str(best_inlineage[1])+ '\t' + best_outlineage[0] + '\t' + \
+				best_outlineage_species+ '\t' + out_class_name + '\t' + \
+				str(best_outlineage[1]) + '\t' + ",".join(best_lineages) + '\t' + str(max_bitscore) + '\n')
+				
 			#reset
 			parse = []
 			currgene = gene
