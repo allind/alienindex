@@ -10,7 +10,7 @@ from ete3 import NCBITaxa
 import sys, os, re, argparse
 
 
-def parse_blast(bls, skip, recipient, ncbi):
+def parse_blast(bls, skip, recipient, ncbi, exclude):
 	max_bitscore = 0
 	
 	bitscores = []
@@ -36,7 +36,9 @@ def parse_blast(bls, skip, recipient, ncbi):
 		if float(bitscore) > max_bitscore:
 			max_bitscore = float(bitscore)
 
-		if skip not in lineage_taxids and "N/A" not in lineage_taxids:
+		excluded = len([e for e in lineage_taxids if e in exclude]) > 0
+
+		if skip not in lineage_taxids and "N/A" not in lineage_taxids and excluded == False:
 		    #make stuff to save
 		    bitscores.append([float(bitscore), staxids.split(';')[0]])
 		    info = [sseqid, float(bitscore), float(evalue), staxids.split(';')[0]]
@@ -146,6 +148,7 @@ def main(argv):
 	parser.add_argument("-s", "--self", required=True, help="Self taxonomy ID to consider for best hit - species or genus taxonomy ID")
 	parser.add_argument("-t", "--taxdb", help="Optional argument - location for ete3 NCBI taxonomy sqlite database (taxa.sqlite). If you are using a non current version of nr or similar this is necessary, must provide taxonomy database that corresponds to nr version")
 	parser.add_argument("-o", "--output", required=True, help="Output file")
+	parser.add_argument("-e", "--exclude", required=False, help="file of taxIDs to exclude - useful if there is a spurious taxon skewing results (e.g., contaminated MAG or other contaminated assembly)")
 
 	args = parser.parse_args()
 
@@ -156,11 +159,17 @@ def main(argv):
 	skip = int(args.self)
 	taxdb = args.taxdb
 	destfile = args.output
+	excludefile = args.exclude
 
 	if taxdb != None:
 		ncbi = NCBITaxa(taxdb)
 	else:
 		ncbi = NCBITaxa()
+
+	if excludefile == None:
+		exclude = []
+	else:
+		exclude = [int(line.strip('\n')) for line in open(excludefile)]
 
 	#
 	#test file just has one sequence
@@ -222,7 +231,7 @@ def main(argv):
 			if currgene in self_bitscores:
 				max_bitscore = self_bitscores[currgene]
 
-				max_blast_bitscore, best_lineages, in_lineage_hits, out_hits = parse_blast(parse, skip, recipient, ncbi)
+				max_blast_bitscore, best_lineages, in_lineage_hits, out_hits = parse_blast(parse, skip, recipient, ncbi, exclude)
 				#iterate over in hits and out hits
 				alien, best_inlineage, best_inlineage_species, in_class_name, \
 				best_outlineage, best_outlineage_species, out_class_name = calculate_alien_info(max_bitscore, in_lineage_hits, out_hits, ncbi)
