@@ -1,5 +1,5 @@
 #! /usr/bin/env python
-#usage: script.py [bls vs nr] [bls vs self] [recipient taxid] [output file]
+#Author: Abigail Lind
 #uses diamond
 #diamond cmd is diamond blastp --query [qfile] --db [db] --outfmt 6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore slen slen qlen nident positive staxids qcovhsp --threads [threads] -b12 -c1 --out [output]
 #for bls vs self, same command except db is the same as query
